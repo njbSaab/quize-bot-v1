@@ -1,0 +1,4 @@
+{
+    "ignore": ["*.json", "data/*", "node_modules/*"]
+  }
+  
