@@ -47,3 +47,30 @@ git push origin new-branch-name
 Подтвердите слияние, нажав на кнопку "Confirm merge".
 
 Удалите ветку, если она больше не нужна, нажав на кнопку "Delete branch".
+
+
+
+
+
+Удаление node_modules и package-lock.json:
+
+Удалите папку node_modules:
+
+rm -rf node_modules
+Удалите файл package-lock.json:
+
+
+rm package-lock.json
+Переустановите зависимости:
+
+
+npm install
+Очистка npm кеша:
+
+Очистите кеш npm:
+npm cache clean --force
+
+
+rm -rf venv
+Создайте новое виртуальное окружение:
+
