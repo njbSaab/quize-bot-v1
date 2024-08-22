@@ -1,426 +1,298 @@
-//bot.js
-require("dotenv").config();
-const { Telegraf, session } = require("telegraf");
-const config = require("./config/config");
-const startStopCommands = require("./commands/startStopCommands");
-const messageHandler = require("./handlers/messageHandler");
-const sessionMiddleware = require("./middleware/sessionMiddleware");
-const { db, initDatabase } = require("./services/database");
-const {
-  startQuiz,
-  stopQuiz,
-  handleQuizMessage,
-} = require("./handlers/quizHandler");
+//userStates.js
+const fs = require("fs");
+const path = require("path");
 
-const bot = new Telegraf(config.botToken);
+const stateFilePath = path.join(__dirname, "../data/userStates.json");
 
-// Инициализация базы данных
-initDatabase();
+module.exports = (ctx) => {
+  const userId = ctx.from.id;
+  const userFirstName = ctx.from.first_name || "Unknown";
+  const userLastName = ctx.from.last_name || "";
+  const userUsername = ctx.from.username || "Unknown";
+  const userLanguage = ctx.from.language_code || "Unknown";
 
-// Использование сессий
-bot.use(session());
-bot.use(sessionMiddleware);
+  let userStates = { sessions: [] };
 
-// Обработка команд
-startStopCommands(bot);
-
-// Обработка сообщений
-bot.on("message", async (ctx) => {
-  try {
-    await messageHandler(ctx);
-  } catch (error) {
-    console.error("Error handling message:", error);
-    await ctx.reply(
-      "Произошла ошибка при обработке сообщения. Для начала новой викторины введите /start."
-    );
+  // Load existing state if it exists
+  if (fs.existsSync(stateFilePath)) {
+    const data = fs.readFileSync(stateFilePath, "utf8");
+    try {
+      userStates = JSON.parse(data);
+    } catch (err) {
+      console.error("Error parsing JSON:", err);
+    }
   }
-});
 
-// Обработка callback-запросов
-bot.on("callback_query", async (ctx) => {
-  try {
-    await handleQuizMessage(ctx);
-  } catch (error) {
-    console.error("Error handling callback query:", error);
-    await ctx.reply(
-      "Произошла ошибка при обработке ответа. Для начала новой викторины введите /start."
-    );
+  // Find or create the user session
+  let userSession = userStates.sessions.find(
+    (session) => session.id === userId
+  );
+  if (userSession) {
+    userSession.counter += 1;
+  } else {
+    userSession = {
+      id: userId,
+      counter: 1,
+      firstName: userFirstName,
+      lastName: userLastName,
+      username: userUsername,
+      language: userLanguage,
+      data: {},
+    };
+    userStates.sessions.push(userSession);
   }
-});
 
-// Обработка команд викторины
-bot.command("start", async (ctx) => {
-  try {
-    console.log("Command /start received");
-    await startQuiz(ctx);
-  } catch (error) {
-    console.error("Error handling /start command:", error);
-    await ctx.reply(
-      "Произошла ошибка при запуске викторины. Попробуйте еще раз с помощью команды /start."
-    );
+  const currentCounter = userSession.counter.toString();
+
+  // Initialize or update the session data for the current counter
+  if (!userSession.data[currentCounter]) {
+    userSession.data[currentCounter] = {
+      correctAnswers: 0,
+      totalQuestions: 5, // Assuming total questions is always 5
+      answeredQuestions: 0,
+    };
   }
-});
 
-bot.command("stop", async (ctx) => {
-  try {
-    console.log("Command /stop received");
-    await stopQuiz(ctx);
-  } catch (error) {
-    console.error("Error handling /stop command:", error);
-    await ctx.reply("Произошла ошибка при остановке викторины.");
-  }
-});
+  // Example updates (these should reflect actual logic)
+  userSession.data[currentCounter].correctAnswers += 1; // Increment correct answers
+  userSession.data[currentCounter].answeredQuestions += 1; // Increment answered questions
 
-bot.action("start_quiz", async (ctx) => {
-  await ctx.answerCbQuery(); // Закрываем всплывающее уведомление
-  await startQuiz(ctx); // Запускаем новую викторину
-});
+  // Write updated state back to the file
+  fs.writeFileSync(stateFilePath, JSON.stringify(userStates, null, 2), "utf8");
 
-bot.action("select_quiz", async (ctx) => {
-  await ctx.answerCbQuery(); // Закрываем всплывающее уведомление
-  await ctx.reply("Вы можете выбрать новую викторину, введя /start.");
-});
+  console.log(`User ID: ${userId}`);
+  console.log(
+    `Correct Answers for Counter ${currentCounter}: ${userSession.data[currentCounter].correctAnswers}`
+  );
+  console.log(
+    `Answered Questions for Counter ${currentCounter}: ${userSession.data[currentCounter].answeredQuestions}`
+  );
+  console.log(
+    `Total Questions for Counter ${currentCounter}: ${userSession.data[currentCounter].totalQuestions}`
+  );
 
-// Запуск бота
-bot.launch();
-
-console.log("Бот запущен...");
+  return userSession.counter;
+};
 
 
 
-//quizHandler.js
-const { Markup } = require("telegraf");
+
+//question.js
 const questions = require("../questions/questions");
-const { insertUserState, getUserState } = require("../services/userService");
+const fs = require("fs");
+const path = require("path");
 
-const resetQuizSession = (ctx) => {
-  ctx.session.quiz = {
-    currentQuestion: 0,
-    score: 0,
-    step: null,
-    name: null,
-    email: null,
-    quizId: generateQuizId(), // Генерируем уникальный ID для викторины
-  };
-};
+const stateFilePath = path.join(__dirname, "../data/userStates.json");
 
-const generateQuizId = () => {
-  return Math.random().toString(36).substr(2, 9); // Пример генерации уникального ID
-};
+module.exports = (bot) => {
+  // Обработка ответов пользователей
+  bot.action(/answer_\d+/, async (ctx) => {
+    try {
+      const questionIndex = ctx.session.questionIndex || 0;
+      if (questionIndex >= questions.length) {
+        await ctx.reply("Викторина завершена. Спасибо за участие!");
+        return;
+      }
 
-const startQuiz = async (ctx) => {
-  console.log("Starting quiz");
-  resetQuizSession(ctx); // Сбрасываем сессию перед началом новой викторины
-  await askQuestion(ctx);
-};
+      const selectedOptionIndex = parseInt(ctx.match[0].split("_")[1]);
+      const question = questions[questionIndex];
+      const isCorrect =
+        question.options[selectedOptionIndex] === question.correctAnswer;
 
-const stopQuiz = async (ctx) => {
-  if (ctx.session.quiz) {
-    const quiz = ctx.session.quiz;
-    console.log(`Stopping quiz. Score: ${quiz.score}/${questions.length}`);
-    await ctx.reply(
-      `Викторина завершена! Ваш счет: ${quiz.score}/${questions.length}`
-    );
+      // Обновление статистики
+      const userId = ctx.from.id;
+      const userSession = findUserSession(ctx, userId);
+      if (userSession) {
+        userSession.data.answeredQuestions++;
+        userSession.data.totalQuestions = questions.length;
+        if (isCorrect) {
+          userSession.data.correctAnswers++;
+        }
+        saveUserState(ctx, userSession);
 
-    // Проверяем наличие записи о викторине по её ID
-    const userState = await getUserState(ctx.chat.id, quiz.quizId);
-    if (userState) {
-      // Обновляем данные о баллах
-      console.log(
-        `Updating user state: chatId=${ctx.chat.id}, quizId=${quiz.quizId}, state=completed, score=${quiz.score}, name=${quiz.name}, email=${quiz.email}`
-      );
-      await insertUserState(
-        ctx.chat.id,
-        quiz.quizId,
-        "completed",
-        quiz.score,
-        quiz.name,
-        quiz.email
-      );
-    } else {
-      // Создаем новую запись
-      console.log(
-        `Creating new user state: chatId=${ctx.chat.id}, quizId=${quiz.quizId}, state=completed, score=${quiz.score}, name=${quiz.name}, email=${quiz.email}`
-      );
-      await insertUserState(
-        ctx.chat.id,
-        quiz.quizId,
-        "completed",
-        quiz.score,
-        quiz.name,
-        quiz.email
-      );
-    }
+        // Логирование состояния пользователя
+        console.log(`User ID: ${userId}`);
+        console.log(`Correct Answers: ${userSession.data.correctAnswers}`);
+        console.log(
+          `Answered Questions: ${userSession.data.answeredQuestions}`
+        );
+        console.log(`Total Questions: ${userSession.data.totalQuestions}`);
+      }
 
-    ctx.session.quiz = null; // Сбрасываем состояние викторины после завершения
-    console.log("Quiz session reset:", ctx.session.quiz);
-  } else {
-    console.log("Attempted to stop quiz, but quiz was not running.");
-    await ctx.reply("Викторина не запущена.");
-  }
-};
-
-const handleQuizMessage = async (ctx) => {
-  const quiz = ctx.session?.quiz;
-
-  if (!quiz) {
-    console.log("No active quiz session found.");
-    await ctx.reply(
-      "Викторина уже завершена. Для начала новой викторины введите /start."
-    );
-    return;
-  }
-
-  // Проверка состояния на некорректные значения
-  if (isNaN(quiz.currentQuestion) || quiz.currentQuestion === undefined) {
-    console.log("Invalid session state detected, resetting quiz session.");
-    resetQuizSession(ctx); // Сбрасываем сессию при некорректном состоянии
-    await ctx.reply("Произошла ошибка. Викторина будет перезапущена.");
-    await startQuiz(ctx);
-    return;
-  }
-
-  console.log("Current quiz session state:", ctx.session.quiz);
-
-  if (quiz.step === "name") {
-    quiz.name = ctx.message?.text?.trim();
-    console.log("Received name:", quiz.name);
-    if (!quiz.name) {
-      await ctx.reply("Пожалуйста, введите корректное имя.");
-      return;
-    }
-    quiz.step = "email";
-    await ctx.reply("Пожалуйста, введите вашу почту:");
-    return;
-  }
-
-  if (quiz.step === "email") {
-    quiz.email = ctx.message?.text?.trim();
-    console.log("Received email:", quiz.email);
-    if (!quiz.email || !isValidEmail(quiz.email)) {
-      await ctx.reply("Пожалуйста, введите корректную почту.");
-      return;
-    }
-    console.log(
-      `Saving user info: chatId=${ctx.chat.id}, quizId=${quiz.quizId}, name=${quiz.name}, email=${quiz.email}`
-    );
-    await saveUserInfo(ctx, quiz.name, quiz.email);
-    await ctx.reply(
-      `Спасибо, ${quiz.name}! Ваш счет: ${quiz.score}/${questions.length}`
-    );
-    await showReturnOptions(ctx);
-
-    // Здесь убедитесь, что сессия сбрасывается только один раз
-    if (ctx.session && ctx.session.quiz) {
-      ctx.session.quiz = null; // Сбрасываем викторину только после полной обработки
-      console.log("Quiz session ended after email input:", ctx.session.quiz);
-    }
-    return;
-  }
-
-  if (quiz.currentQuestion >= questions.length) {
-    console.log("Quiz has already completed.");
-    await ctx.reply(
-      "Викторина уже завершена. Для начала новой викторины введите /start."
-    );
-    ctx.session.quiz = null;
-    return;
-  }
-
-  const userAnswer =
-    ctx.callbackQuery?.data?.toLowerCase() || ctx.message?.text?.toLowerCase();
-
-  console.log("User answer received:", userAnswer);
-
-  if (!userAnswer) {
-    console.log("No valid answer received.");
-    await ctx.reply(
-      "Произошла ошибка при обработке ответа. Для начала новой викторины введите /start."
-    );
-    ctx.session.quiz = null;
-    return;
-  }
-
-  const currentQuestion = questions[quiz.currentQuestion];
-  console.log("Current question:", currentQuestion);
-
-  if (
-    currentQuestion &&
-    userAnswer === currentQuestion.correctAnswer.toLowerCase()
-  ) {
-    quiz.score++;
-    console.log("Correct answer. Score incremented:", quiz.score);
-  }
-
-  quiz.currentQuestion++;
-  console.log(
-    "Proceeding to next question. CurrentQuestion:",
-    quiz.currentQuestion
-  );
-
-  if (quiz.currentQuestion < questions.length) {
-    await askQuestion(ctx);
-  } else {
-    console.log(
-      `Quiz completed. Final score: ${quiz.score}/${questions.length}`
-    );
-    const userInfo = await getUserInfo(ctx);
-    if (!userInfo || !userInfo.name || !userInfo.email) {
-      await ctx.reply("Пожалуйста, введите ваше имя:");
-      quiz.step = "name";
-      console.log("Name step initiated.");
-    } else {
-      quiz.name = userInfo.name;
-      quiz.email = userInfo.email;
       await ctx.reply(
-        `Спасибо, ${quiz.name}! Ваш счет: ${quiz.score}/${questions.length}`
+        isCorrect
+          ? "Отлично, вы на шаг ближе к победе 👍"
+          : "Неостанавливайтесь, вы на правильном пути ✅"
       );
-      await showReturnOptions(ctx);
-      ctx.session.quiz = null; // Сбрасываем сессию только после полной обработки
-      console.log("Quiz session fully completed and reset.");
+
+      // Переход к следующему вопросу
+      ctx.session.questionIndex = questionIndex + 1;
+      if (ctx.session.questionIndex < questions.length) {
+        await startQuiz(ctx);
+      } else {
+        await ctx.reply("Викторина завершена. Спасибо за участие!");
+      }
+    } catch (err) {
+      console.error("Ошибка при обработке ответа:", err);
     }
-  }
+  });
+
+  // Обработка кнопки "Назад"
+  bot.action("back", async (ctx) => {
+    try {
+      const questionIndex = ctx.session.questionIndex || 0;
+      if (questionIndex > 0) {
+        ctx.session.questionIndex = questionIndex - 1;
+        await ctx.reply("Давайте вернемся к предыдущему вопросу.");
+        await startQuiz(ctx);
+      } else {
+        await ctx.reply(
+          "Мы не можем вернуться к предыдущему вопросу, вы на первом вопросе. Вы хотите выйти?",
+          {
+            reply_markup: {
+              inline_keyboard: [[{ text: "Выйти", callback_data: "exit" }]],
+            },
+          }
+        );
+      }
+    } catch (err) {
+      console.error("Ошибка при обработке кнопки 'Назад':", err);
+    }
+  });
+
+  // Обработка кнопки "Выйти"
+  bot.action("exit", async (ctx) => {
+    try {
+      await ctx.reply(
+        "Викторина остановлена. Чтобы начать заново, используйте команду /start."
+      );
+      ctx.session.questionIndex = 0; // Сброс индекса вопроса
+    } catch (err) {
+      console.error("Ошибка при обработке кнопки 'Выйти':", err);
+    }
+  });
 };
 
-const showReturnOptions = async (ctx) => {
-  console.log("Showing return options to the user.");
-  await ctx.reply(
-    "Что бы вы хотели сделать дальше?",
-    Markup.inlineKeyboard([
-      Markup.button.callback("Начать новую викторину", "start_quiz"),
-      Markup.button.callback("Выбрать другую викторину", "select_quiz"),
-    ])
-  );
-};
 
-const askQuestion = async (ctx) => {
-  const quiz = ctx.session.quiz;
-  console.log("Asking question. Current state:", quiz);
-  if (quiz.currentQuestion >= questions.length) {
-    await ctx.reply("Викторина завершена.");
-    console.log("Quiz already completed.");
+
+
+// Функция для запуска викторины
+async function startQuiz(ctx) {
+  const questionIndex = ctx.session.questionIndex || 0;
+  if (questionIndex >= questions.length) {
+    await ctx.reply("Викторина завершена. Спасибо за участие!");
     return;
   }
-  const currentQuestion = questions[quiz.currentQuestion];
-  const options = currentQuestion.options;
 
-  const keyboard = Markup.inlineKeyboard(
-    options.map((option) =>
-      Markup.button.callback(option, option.toLowerCase())
-    )
-  );
+  const question = questions[questionIndex];
+  const optionsMarkup = {
+    reply_markup: {
+      inline_keyboard: [
+        ...question.options.reduce((acc, option, index) => {
+          const rowIndex = Math.floor(index / 2);
+          if (!acc[rowIndex]) {
+            acc[rowIndex] = [];
+          }
+          acc[rowIndex].push({
+            text: option,
+            callback_data: `answer_${index}`,
+          });
+          return acc;
+        }, []),
+        [{ text: "Назад", callback_data: "back" }],
+        // [{ text: "Выйти", callback_data: "exit" }],
+      ],
+    },
+  };
+  await ctx.reply(question.question, optionsMarkup);
+}
 
-  await ctx.reply(
-    `Вопрос ${quiz.currentQuestion + 1}: ${currentQuestion.question}`,
-    keyboard
-  );
-  console.log("Question sent to the user.");
-};
-
-const saveUserInfo = async (ctx, name, email) => {
-  console.log(
-    `Saving user info: chatId=${ctx.chat.id}, quizId=${ctx.session.quiz.quizId}, state=user_info, score=0, name=${name}, email=${email}`
-  );
-  await insertUserState(
-    ctx.chat.id,
-    ctx.session.quiz.quizId,
-    "user_info",
-    0,
-    name,
-    email
-  );
-};
-
-const getUserInfo = async (ctx) => {
-  const userState = await getUserState(ctx.chat.id, ctx.session.quiz.quizId);
-  if (userState && userState.state === "user_info") {
-    return { name: userState.name, email: userState.email };
+// Функция для поиска сессии пользователя
+function findUserSession(ctx, userId) {
+  if (fs.existsSync(stateFilePath)) {
+    const data = fs.readFileSync(stateFilePath, "utf8");
+    try {
+      const userStates = JSON.parse(data);
+      return userStates.sessions.find((session) => session.id === userId);
+    } catch (err) {
+      console.error("Ошибка при парсинге JSON:", err);
+    }
   }
   return null;
-};
+}
 
-const isValidEmail = (email) => {
-  const re = /\S+@\S+\.\S+/;
-  return re.test(email);
-};
-
-module.exports = { startQuiz, stopQuiz, handleQuizMessage, showReturnOptions };
-
-
-
-
-const sqlite3 = require("sqlite3").verbose();
-const config = require("../config/config");
-
-const db = new sqlite3.Database(config.dbPath);
-
-const initDatabase = () => {
-  db.serialize(() => {
-    db.run(
-      `CREATE TABLE IF NOT EXISTS user_states (
-      chatId TEXT PRIMARY KEY,
-      state TEXT,
-      score INTEGER,
-      name TEXT,
-      email TEXT
-    )`,
-      (err) => {
-        if (err) {
-          console.error("Error creating table:", err.message);
-        } else {
-          console.log("Table user_states created or already exists.");
-        }
+// Функция для сохранения состояния пользователя
+function saveUserState(ctx, userSession) {
+  if (fs.existsSync(stateFilePath)) {
+    const data = fs.readFileSync(stateFilePath, "utf8");
+    try {
+      const userStates = JSON.parse(data);
+      const sessionIndex = userStates.sessions.findIndex(
+        (session) => session.id === userSession.id
+      );
+      if (sessionIndex !== -1) {
+        userStates.sessions[sessionIndex] = userSession;
+        fs.writeFileSync(
+          stateFilePath,
+          JSON.stringify(userStates, null, 2),
+          "utf8"
+        );
       }
-    );
+    } catch (err) {
+      console.error("Ошибка при парсинге JSON:", err);
+    }
+  }
+}
+
+// Экспортируем функцию startQuiz отдельно
+module.exports.startQuiz = startQuiz;
+
+
+//startStopCommands.js
+const userState = require("../state/userState");
+const quizActions = require("../actions/quizActions");
+
+module.exports = (bot) => {
+  // Обработка команды /start
+  bot.command("start", async (ctx) => {
+    try {
+      const counter = await userState(ctx);
+      await ctx.reply(
+        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`
+      );
+
+      // Сброс индекса вопроса
+      ctx.session.questionIndex = 0;
+
+      // Запуск викторины
+      quizActions(bot);
+      await quizActions.startQuiz(ctx);
+    } catch (err) {
+      console.error("Ошибка при обработке команды /start:", err);
+    }
+  });
+
+  // Обработка команды /stop
+  bot.command("stop", (ctx) => {
+    try {
+      ctx.reply(
+        "Викторина остановлена. Чтобы начать заново, используйте команду /start."
+      );
+      ctx.session.questionIndex = 0; // Сброс индекса вопроса
+    } catch (err) {
+      console.error("Ошибка при обработке команды /stop:", err);
+    }
+  });
+
+  // Обработка кнопки "Выйти"
+  bot.action("exit", (ctx) => {
+    try {
+      ctx.reply(
+        "Викторина остановлена. Чтобы начать заново, используйте команду /start."
+      );
+      ctx.session.questionIndex = 0; // Сброс индекса вопроса
+    } catch (err) {
+      console.error("Ошибка при обработке кнопки 'Выйти':", err);
+    }
   });
 };
-
-const insertUserState = async (chatId, state, score, name, email) => {
-  const sql = `INSERT INTO user_states (chatId, state, score, name, email) VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(chatId) DO UPDATE SET state=excluded.state, score=excluded.score, name=excluded.name, email=excluded.email;`;
-  return new Promise((resolve, reject) => {
-    db.run(sql, [chatId, state, score, name, email], function (err) {
-      if (err) {
-        console.error(err.message);
-        return reject(err);
-      }
-      console.log(`A row has been inserted/updated with rowid ${this.lastID}`);
-      resolve();
-    });
-  });
-};
-
-const getUserState = async (chatId) => {
-  const sql = `SELECT * FROM user_states WHERE chatId = ?;`;
-  return new Promise((resolve, reject) => {
-    db.get(sql, [chatId], (err, row) => {
-      if (err) {
-        console.error(err.message);
-        return reject(err);
-      }
-      resolve(row);
-    });
-  });
-};
-
-module.exports = { db, initDatabase, insertUserState, getUserState };
-
-
-
-
-const sqlite3 = require("sqlite3").verbose();
-const config = require("../config/config");
-
-const db = new sqlite3.Database(config.dbPath);
-
-const initDatabase = () => {
-  db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS user_states (
-      chatId TEXT PRIMARY KEY,
-      state TEXT,
-      score INTEGER
-    )`);
-  });
-};
-
-module.exports = { db, initDatabase };

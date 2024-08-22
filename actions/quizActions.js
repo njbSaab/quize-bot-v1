@@ -1,16 +1,42 @@
 const questions = require("../questions/questions");
-const fs = require("fs");
+const userState = require("../state/userState");
+const fs = require("fs").promises;
 const path = require("path");
-
 const stateFilePath = path.join(__dirname, "../data/userStates.json");
 
 module.exports = (bot) => {
-  // Обработка ответов пользователей
   bot.action(/answer_\d+/, async (ctx) => {
     try {
       const questionIndex = ctx.session.questionIndex || 0;
       if (questionIndex >= questions.length) {
-        await ctx.reply("Викторина завершена. Спасибо за участие!");
+        // После завершения всех вопросов проверяем, есть ли имя и email
+        const userId = ctx.from?.id?.toString() || "unknown";
+        let userStates = { sessions: [] };
+
+        try {
+          const userStatesData = await fs.readFile(stateFilePath, "utf8");
+          userStates = JSON.parse(userStatesData);
+        } catch (err) {
+          if (err.code !== "ENOENT") {
+            console.error(
+              "Ошибка при чтении или парсинге userStates.json:",
+              err
+            );
+          }
+        }
+
+        const userSession = userStates.sessions.find(
+          (session) => session.id === userId
+        );
+
+        if (userSession && userSession.name && userSession.email) {
+          await ctx.reply("Викторина завершена. Спасибо за участие!");
+        } else {
+          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply("Пожалуйста, укажите ваше имя.");
+          ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
+        }
+
         return;
       }
 
@@ -19,30 +45,13 @@ module.exports = (bot) => {
       const isCorrect =
         question.options[selectedOptionIndex] === question.correctAnswer;
 
-      // Обновление статистики
-      const userId = ctx.from.id;
-      const userSession = findUserSession(ctx, userId);
-      if (userSession) {
-        userSession.data.answeredQuestions++;
-        userSession.data.totalQuestions = questions.length;
-        if (isCorrect) {
-          userSession.data.correctAnswers++;
-        }
-        saveUserState(ctx, userSession);
-
-        // Логирование состояния пользователя
-        console.log(`User ID: ${userId}`);
-        console.log(`Correct Answers: ${userSession.data.correctAnswers}`);
-        console.log(
-          `Answered Questions: ${userSession.data.answeredQuestions}`
-        );
-        console.log(`Total Questions: ${userSession.data.totalQuestions}`);
-      }
+      // Обновление состояния пользователя
+      await userState(ctx, isCorrect);
 
       await ctx.reply(
         isCorrect
           ? "Отлично, вы на шаг ближе к победе 👍"
-          : "Неостанавливайтесь, вы на правильном пути ✅"
+          : "Не останавливайтесь, вы на правильном пути ✅"
       );
 
       // Переход к следующему вопросу
@@ -50,10 +59,63 @@ module.exports = (bot) => {
       if (ctx.session.questionIndex < questions.length) {
         await startQuiz(ctx);
       } else {
-        await ctx.reply("Викторина завершена. Спасибо за участие!");
+        const userId = ctx.from?.id?.toString() || "unknown";
+        let userStates = { sessions: [] };
+
+        try {
+          const userStatesData = await fs.readFile(stateFilePath, "utf8");
+          userStates = JSON.parse(userStatesData);
+        } catch (err) {
+          if (err.code !== "ENOENT") {
+            console.error(
+              "Ошибка при чтении или парсинге userStates.json:",
+              err
+            );
+          }
+        }
+
+        const userSession = userStates.sessions.find(
+          (session) => session.id === userId
+        );
+
+        if (userSession && userSession.name && userSession.email) {
+          await ctx.reply("Викторина завершена. Спасибо за участие!");
+        } else {
+          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply("Пожалуйста, укажите ваше имя.");
+          ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
+        }
       }
     } catch (err) {
       console.error("Ошибка при обработке ответа:", err);
+    }
+  });
+
+  bot.on("text", async (ctx) => {
+    try {
+      if (ctx.session.awaitingName) {
+        ctx.session.name = ctx.message.text;
+        ctx.session.awaitingName = false;
+        ctx.session.awaitingEmail = true;
+        await ctx.reply(
+          `Спасибо, ${ctx.session.name}! Теперь укажите ваш адрес электронной почты.`
+        );
+      } else if (ctx.session.awaitingEmail) {
+        ctx.session.email = ctx.message.text;
+        ctx.session.awaitingEmail = false;
+
+        // Сохранение имени и почты в userState.json
+        await userState(ctx, null, {
+          name: ctx.session.name,
+          email: ctx.session.email,
+        });
+
+        await ctx.reply(
+          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${ctx.session.email}. Викторина полностью завершена!`
+        );
+      }
+    } catch (err) {
+      console.error("Ошибка при обработке текстового ввода:", err);
     }
   });
 
@@ -117,48 +179,10 @@ async function startQuiz(ctx) {
           return acc;
         }, []),
         [{ text: "Назад", callback_data: "back" }],
-        // [{ text: "Выйти", callback_data: "exit" }],
       ],
     },
   };
   await ctx.reply(question.question, optionsMarkup);
-}
-
-// Функция для поиска сессии пользователя
-function findUserSession(ctx, userId) {
-  if (fs.existsSync(stateFilePath)) {
-    const data = fs.readFileSync(stateFilePath, "utf8");
-    try {
-      const userStates = JSON.parse(data);
-      return userStates.sessions.find((session) => session.id === userId);
-    } catch (err) {
-      console.error("Ошибка при парсинге JSON:", err);
-    }
-  }
-  return null;
-}
-
-// Функция для сохранения состояния пользователя
-function saveUserState(ctx, userSession) {
-  if (fs.existsSync(stateFilePath)) {
-    const data = fs.readFileSync(stateFilePath, "utf8");
-    try {
-      const userStates = JSON.parse(data);
-      const sessionIndex = userStates.sessions.findIndex(
-        (session) => session.id === userSession.id
-      );
-      if (sessionIndex !== -1) {
-        userStates.sessions[sessionIndex] = userSession;
-        fs.writeFileSync(
-          stateFilePath,
-          JSON.stringify(userStates, null, 2),
-          "utf8"
-        );
-      }
-    } catch (err) {
-      console.error("Ошибка при парсинге JSON:", err);
-    }
-  }
 }
 
 // Экспортируем функцию startQuiz отдельно
