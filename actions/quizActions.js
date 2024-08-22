@@ -182,7 +182,15 @@ async function startQuiz(ctx) {
       ],
     },
   };
-  await ctx.reply(question.question, optionsMarkup);
+
+  if (question.imageUrl) {
+    await ctx.replyWithPhoto(
+      { url: question.imageUrl },
+      { caption: question.question, ...optionsMarkup }
+    );
+  } else {
+    await ctx.reply(question.question, optionsMarkup);
+  }
 }
 
 // Экспортируем функцию startQuiz отдельно
