@@ -1,5 +1,4 @@
-// quizActions.js
-
+const { Markup } = require("telegraf"); // Импортируем Markup для создания inline-кнопок
 const questions = require("../questions/questions");
 const userState = require("../state/userState");
 const fs = require("fs").promises;
@@ -32,8 +31,16 @@ module.exports = (bot) => {
         );
 
         if (userSession && userSession.name && userSession.email) {
-          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          // Если почта уже есть, предлагаем подтвердить
+          await ctx.reply(
+            `Скажите, это ваша почта? ${userSession.email}`,
+            Markup.inlineKeyboard([
+              Markup.button.callback("Да, это моя почта", "confirm_email"),
+              Markup.button.callback("Нет, другая почта", "new_email"),
+            ])
+          );
         } else {
+          // Если почты нет, запрашиваем её
           await ctx.reply("Викторина завершена. Спасибо за участие!");
           await ctx.reply("Пожалуйста, укажите ваше имя.");
           ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
@@ -61,6 +68,7 @@ module.exports = (bot) => {
       if (ctx.session.questionIndex < questions.length) {
         await startQuiz(ctx);
       } else {
+        // Аналогичная проверка на окончание викторины
         const userId = ctx.from?.id?.toString() || "unknown";
         let userStates = { sessions: [] };
 
@@ -81,7 +89,13 @@ module.exports = (bot) => {
         );
 
         if (userSession && userSession.name && userSession.email) {
-          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply(
+            `Скажите, это ваша почта? ${userSession.email}`,
+            Markup.inlineKeyboard([
+              Markup.button.callback("Да, это моя почта", "confirm_email"),
+              Markup.button.callback("Нет, другая почта", "new_email"),
+            ])
+          );
         } else {
           await ctx.reply("Викторина завершена. Спасибо за участие!");
           await ctx.reply("Пожалуйста, укажите ваше имя.");
@@ -98,10 +112,39 @@ module.exports = (bot) => {
       if (ctx.session.awaitingName) {
         ctx.session.name = ctx.message.text;
         ctx.session.awaitingName = false;
-        ctx.session.awaitingEmail = true;
-        await ctx.reply(
-          `Спасибо, ${ctx.session.name}! Теперь укажите ваш адрес электронной почты.`
+        ctx.session.awaitingEmailConfirmation = true;
+
+        const userId = ctx.from?.id?.toString() || "unknown";
+        let userStates = { sessions: [] };
+
+        try {
+          const userStatesData = await fs.readFile(stateFilePath, "utf8");
+          userStates = JSON.parse(userStatesData);
+        } catch (err) {
+          if (err.code !== "ENOENT") {
+            console.error(
+              "Ошибка при чтении или парсинге userStates.json:",
+              err
+            );
+          }
+        }
+
+        const userSession = userStates.sessions.find(
+          (session) => session.id === userId
         );
+
+        if (userSession && userSession.email) {
+          await ctx.reply(
+            `Скажите, это ваша почта? ${userSession.email}`,
+            Markup.inlineKeyboard([
+              Markup.button.callback("Да, это моя почта", "confirm_email"),
+              Markup.button.callback("Нет, другая почта", "new_email"),
+            ])
+          );
+        } else {
+          await ctx.reply("Теперь укажите ваш адрес электронной почты.");
+          ctx.session.awaitingEmail = true;
+        }
       } else if (ctx.session.awaitingEmail) {
         ctx.session.email = ctx.message.text;
         ctx.session.awaitingEmail = false;
@@ -118,6 +161,50 @@ module.exports = (bot) => {
       }
     } catch (err) {
       console.error("Ошибка при обработке текстового ввода:", err);
+    }
+  });
+
+  bot.action("confirm_email", async (ctx) => {
+    try {
+      const userId = ctx.from?.id?.toString() || "unknown";
+      let userStates = { sessions: [] };
+
+      try {
+        const userStatesData = await fs.readFile(stateFilePath, "utf8");
+        userStates = JSON.parse(userStatesData);
+      } catch (err) {
+        if (err.code !== "ENOENT") {
+          console.error("Ошибка при чтении или парсинге userStates.json:", err);
+        }
+      }
+
+      const userSession = userStates.sessions.find(
+        (session) => session.id === userId
+      );
+
+      if (userSession && userSession.email) {
+        await userState(ctx, null, {
+          name: ctx.session.name,
+          email: userSession.email,
+        });
+
+        await ctx.reply(
+          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${userSession.email}. Викторина полностью завершена!`
+        );
+      } else {
+        await ctx.reply("Произошла ошибка при подтверждении почты.");
+      }
+    } catch (err) {
+      console.error("Ошибка при обработке подтверждения почты:", err);
+    }
+  });
+
+  bot.action("new_email", async (ctx) => {
+    try {
+      await ctx.reply("Теперь укажите ваш новый адрес электронной почты.");
+      ctx.session.awaitingEmail = true;
+    } catch (err) {
+      console.error("Ошибка при обработке новой почты:", err);
     }
   });
 
