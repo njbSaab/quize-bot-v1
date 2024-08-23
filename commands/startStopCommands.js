@@ -1,6 +1,6 @@
-//startStopCommands.js
+const { mainMenu } = require("../menu/menu");
 const userState = require("../state/userState");
-const quizActions = require("../actions/quizActions");
+const { startQuiz } = require("../actions/quizActions");
 
 module.exports = (bot) => {
   // Обработка команды /start
@@ -15,23 +15,42 @@ module.exports = (bot) => {
       ctx.session.questionIndex = 0;
 
       // Запуск викторины
-      quizActions(bot);
-      await quizActions.startQuiz(ctx);
+      await startQuiz(ctx);
     } catch (err) {
       console.error("Ошибка при обработке команды /start:", err);
     }
   });
 
-  // Обработка команды /stop
-  bot.command("stop", (ctx) => {
+  // Обработка команды и текстового ввода "start"
+  bot.hears("start", async (ctx) => {
     try {
-      ctx.reply(
-        "Викторина остановлена. Чтобы начать заново, используйте команду /start."
+      const counter = await userState(ctx);
+      await ctx.reply(
+        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`
       );
-      ctx.session.questionIndex = 0; // Сброс индекса вопроса
+
+      // Сброс индекса вопроса
+      ctx.session.questionIndex = 0;
+
+      // Запуск викторины
+      await startQuiz(ctx);
     } catch (err) {
-      console.error("Ошибка при обработке команды /stop:", err);
+      console.error("Ошибка при обработке команды start:", err);
     }
+  });
+
+  // Обработка команды и текстового ввода "about"
+  bot.hears("about", async (ctx) => {
+    await ctx.reply(
+      "Это бот для викторин, который помогает вам учиться и развлекаться одновременно!"
+    );
+  });
+
+  // Обработка команды и текстового ввода "help"
+  bot.hears("help", async (ctx) => {
+    await ctx.reply(
+      "Чтобы начать викторину, нажмите 'start'. Для информации о боте, нажмите 'about'. Для помощи, нажмите 'help'."
+    );
   });
 
   // Обработка кнопки "Выйти"

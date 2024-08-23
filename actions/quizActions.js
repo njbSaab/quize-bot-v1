@@ -1,3 +1,5 @@
+// quizActions.js
+
 const questions = require("../questions/questions");
 const userState = require("../state/userState");
 const fs = require("fs").promises;
@@ -182,7 +184,15 @@ async function startQuiz(ctx) {
       ],
     },
   };
-  await ctx.reply(question.question, optionsMarkup);
+
+  if (question.imageUrl) {
+    await ctx.replyWithPhoto(
+      { url: question.imageUrl },
+      { caption: question.question, ...optionsMarkup }
+    );
+  } else {
+    await ctx.reply(question.question, optionsMarkup);
+  }
 }
 
 // Экспортируем функцию startQuiz отдельно
