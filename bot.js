@@ -1,6 +1,7 @@
 const { Telegraf } = require("telegraf");
 const config = require("./config/config");
 const startStopCommands = require("./commands/startStopCommands");
+const quizActions = require("./actions/quizActions");
 const sessionMiddleware = require("./middleware/sessionMiddleware");
 
 const bot = new Telegraf(config.botToken);
@@ -10,6 +11,7 @@ bot.use(sessionMiddleware);
 
 // Обработка команд
 startStopCommands(bot);
+quizActions(bot);
 
 // Глобальный обработчик ошибок
 bot.catch((err, ctx) => {

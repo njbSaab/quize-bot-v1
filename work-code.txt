@@ -1,3 +1,34 @@
+const { Telegraf } = require("telegraf");
+const config = require("./config/config");
+const startStopCommands = require("./commands/startStopCommands");
+const sessionMiddleware = require("./middleware/sessionMiddleware");
+
+const bot = new Telegraf(config.botToken);
+
+// Настройка сессий
+bot.use(sessionMiddleware);
+
+// Обработка команд
+startStopCommands(bot);
+
+// Глобальный обработчик ошибок
+bot.catch((err, ctx) => {
+  console.error(`Ошибка для ${ctx.updateType}`, err);
+});
+
+// Запуск бота
+async function startBot() {
+  try {
+    await bot.launch();
+    console.log("Бот запущен...");
+  } catch (err) {
+    console.error("Ошибка при запуске бота:", err);
+  }
+}
+
+startBot();
+
+
 const questions = require("../questions/questions");
 const userState = require("../state/userState");
 const fs = require("fs").promises;
@@ -10,7 +41,7 @@ module.exports = (bot) => {
       const questionIndex = ctx.session.questionIndex || 0;
       if (questionIndex >= questions.length) {
         // После завершения всех вопросов проверяем, есть ли имя и email
-        const userId = (ctx.from && ctx.from.id) ? ctx.from.id.toString() : "unknown";
+        const userId = ctx.from?.id?.toString() || "unknown";
         let userStates = { sessions: [] };
 
         try {
@@ -59,7 +90,7 @@ module.exports = (bot) => {
       if (ctx.session.questionIndex < questions.length) {
         await startQuiz(ctx);
       } else {
-        const userId = (ctx.from && ctx.from.id) ? ctx.from.id.toString() : "unknown";
+        const userId = ctx.from?.id?.toString() || "unknown";
         let userStates = { sessions: [] };
 
         try {
@@ -164,23 +195,33 @@ async function startQuiz(ctx) {
   }
 
   const question = questions[questionIndex];
-
-  // Если у вопроса есть изображение, отправляем его
-  if (question.imageUrl) {
-    await ctx.replyWithPhoto(question.imageUrl, { caption: question.question });
-  } else {
-    await ctx.reply(question.question);
-  }
-
   const optionsMarkup = {
     reply_markup: {
-      inline_keyboard: question.options.map((option, index) => [
-        { text: option, callback_data: `answer_${index}` },
-      ]),
+      inline_keyboard: [
+        ...question.options.reduce((acc, option, index) => {
+          const rowIndex = Math.floor(index / 2);
+          if (!acc[rowIndex]) {
+            acc[rowIndex] = [];
+          }
+          acc[rowIndex].push({
+            text: option,
+            callback_data: `answer_${index}`,
+          });
+          return acc;
+        }, []),
+        [{ text: "Назад", callback_data: "back" }],
+      ],
     },
   };
 
-  await ctx.reply("Выберите ответ:", optionsMarkup);
+  if (question.imageUrl) {
+    await ctx.replyWithPhoto(
+      { url: question.imageUrl },
+      { caption: question.question, ...optionsMarkup }
+    );
+  } else {
+    await ctx.reply(question.question, optionsMarkup);
+  }
 }
 
 // Экспортируем функцию startQuiz отдельно
