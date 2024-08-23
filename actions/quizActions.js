@@ -97,7 +97,9 @@ module.exports = (bot) => {
             ])
           );
         } else {
-          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply(
+            "Викторина завершена. Спасибо за участие! Ви можете продолжить играть на нашем сайте https://quizwhizworld.top/"
+          );
           await ctx.reply("Пожалуйста, укажите ваше имя.");
           ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
         }
