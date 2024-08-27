@@ -41,7 +41,9 @@ module.exports = (bot) => {
           );
         } else {
           // Если почты нет, запрашиваем её
-          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply(
+            "Викторина завершена. Спасибо за участие! Остался последний шаг"
+          );
           await ctx.reply("Пожалуйста, укажите ваше имя.");
           ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
         }
@@ -97,7 +99,9 @@ module.exports = (bot) => {
             ])
           );
         } else {
-          await ctx.reply("Викторина завершена. Спасибо за участие!");
+          await ctx.reply(
+            "Викторина завершена. Спасибо за участие! Остался последний шаг"
+          );
           await ctx.reply("Пожалуйста, укажите ваше имя.");
           ctx.session.awaitingName = true; // Устанавливаем флаг ожидания имени
         }
@@ -156,7 +160,7 @@ module.exports = (bot) => {
         });
 
         await ctx.reply(
-          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${ctx.session.email}. Викторина полностью завершена!`
+          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${ctx.session.email}. Ви можете продолжить играть на нашем сайте https://quizwhizworld.top/`
         );
       }
     } catch (err) {
@@ -189,7 +193,7 @@ module.exports = (bot) => {
         });
 
         await ctx.reply(
-          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${userSession.email}. Викторина полностью завершена!`
+          `Спасибо! Вы указали имя: ${ctx.session.name} и почту: ${userSession.email}. Ви можете продолжить играть на нашем сайте https://quizwhizworld.top/`
         );
       } else {
         await ctx.reply("Произошла ошибка при подтверждении почты.");
@@ -248,7 +252,9 @@ module.exports = (bot) => {
 async function startQuiz(ctx) {
   const questionIndex = ctx.session.questionIndex || 0;
   if (questionIndex >= questions.length) {
-    await ctx.reply("Викторина завершена. Спасибо за участие!");
+    await ctx.reply(
+      "Викторина завершена. Спасибо за участие! Остался последний шаг"
+    );
     return;
   }
 
