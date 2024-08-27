@@ -1,3 +1,4 @@
+//quizActions.js
 const { Markup } = require("telegraf"); // Импортируем Markup для создания inline-кнопок
 const questions = require("../questions/questions");
 const userState = require("../state/userState");

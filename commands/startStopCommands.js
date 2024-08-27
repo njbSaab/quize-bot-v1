@@ -1,3 +1,4 @@
+//startStopCommands.js
 const { mainMenu } = require("../menu/menu");
 const userState = require("../state/userState");
 const { startQuiz } = require("../actions/quizActions");
@@ -8,7 +9,8 @@ module.exports = (bot) => {
     try {
       const counter = await userState(ctx);
       await ctx.reply(
-        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`
+        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`,
+        mainMenu // Добавляем клавиатуру
       );
 
       // Сброс индекса вопроса
@@ -17,7 +19,11 @@ module.exports = (bot) => {
       // Запуск викторины
       await startQuiz(ctx);
     } catch (err) {
-      console.error("Ошибка при обработке команды /start:", err);
+      if (err.response && err.response.error_code === 403) {
+        console.log("Бот был заблокирован пользователем:", ctx.from.id);
+      } else {
+        console.error("Ошибка при обработке команды /start:", err);
+      }
     }
   });
 
@@ -26,7 +32,8 @@ module.exports = (bot) => {
     try {
       const counter = await userState(ctx);
       await ctx.reply(
-        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`
+        `Добро пожаловать на наш квиз! Вы запустили эту команду ${counter} раз(а).`,
+        mainMenu // Добавляем клавиатуру
       );
 
       // Сброс индекса вопроса
@@ -35,7 +42,11 @@ module.exports = (bot) => {
       // Запуск викторины
       await startQuiz(ctx);
     } catch (err) {
-      console.error("Ошибка при обработке команды start:", err);
+      if (err.response && err.response.error_code === 403) {
+        console.log("Бот был заблокирован пользователем:", ctx.from.id);
+      } else {
+        console.error("Ошибка при обработке команды start:", err);
+      }
     }
   });
 
