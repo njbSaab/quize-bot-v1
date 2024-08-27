@@ -1,3 +1,4 @@
+//question.js
 module.exports = [
   {
     question: "Сколько будет 2 + 2?",
